@@ -81,6 +81,24 @@ def load_pdf(file_path: str, min_chars_for_text_page: int = 40) -> ParsedDocumen
       2. Also attempt table extraction via pdfplumber; if tables are found,
          add them as separate "table" chunks (in addition to page text),
          since tabular spec data is often the most extraction-critical part.
+
+    NOTE ON INTENTIONAL OVERLAP: a page's raw text chunk and its table
+    chunk(s) will contain overlapping content — a spec value inside a
+    table shows up both in the messy raw-text rendering of the page AND
+    in the cleaned, row-by-row table chunk. This is deliberate, not an
+    oversight: raw PDF text extraction frequently mangles table structure
+    (columns collapse, spacing gets lost), so pdfplumber's cleaner
+    row-by-row rendering exists specifically to give the extraction agent
+    a reliable structured alternative for exact values. The overlap does
+    cost some extra tokens per call, but a naive de-duplication pass here
+    (regex/line-diffing the two versions against each other) is fragile
+    enough — different whitespace, cell ordering, wrapped cells — that it
+    risks silently deleting legitimate prose alongside table rows. Instead,
+    the extraction agent's system instruction (see extractor.py)
+    explicitly tells the model to prefer citing the "table" chunk_id over
+    the "text" chunk_id when a value is available in both, which resolves
+    the ambiguity at the point that actually matters (citation accuracy)
+    without risking data loss at ingestion time.
     """
     if not os.path.exists(file_path):
         raise FileNotFoundError(f"PDF not found: {file_path}")

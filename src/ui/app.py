@@ -217,7 +217,8 @@ for tab, doc_name in zip(tabs[1:], doc_names):
             source_chunk_id = entry.get("source_chunk_id")
             flag = entry.get("flag")
 
-            if isinstance(value, list):
+            is_list_field = isinstance(value, list)
+            if is_list_field:
                 display_value = ", ".join(value) if value else None
             else:
                 display_value = value
@@ -231,7 +232,18 @@ for tab, doc_name in zip(tabs[1:], doc_names):
                         flabel, value=str(display_value),
                         key=f"{doc_name}::{fkey}", label_visibility="collapsed",
                     )
-                    fields[fkey]["value"] = edited
+                    if is_list_field:
+                        # Preserve the original list type — writing the raw
+                        # comma-joined string back here would silently
+                        # corrupt the field's schema (list -> str) every
+                        # time this widget reruns, which happens on every
+                        # interaction with the page, not just on an
+                        # intentional edit to this specific field.
+                        fields[fkey]["value"] = [
+                            v.strip() for v in edited.split(",") if v.strip()
+                        ]
+                    else:
+                        fields[fkey]["value"] = edited
                 else:
                     st.markdown("_Not found in document_")
             with c3:

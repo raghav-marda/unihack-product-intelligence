@@ -17,24 +17,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional
 
+from src.env_utils import load_env_file
 from src.ingestion.pdf_loader import ParsedDocument, load_pdf, load_pdfs_from_dir
 from src.extraction.extractor import GeminiExtractor, ExtractionResult
 from src.validation.validator import ValidationReport, validate_extraction
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 OUTPUT_DIR = REPO_ROOT / "data" / "output"
-ENV_PATH = REPO_ROOT / ".env"
-
-
-def load_env_file(env_path: Path = ENV_PATH) -> None:
-    """Minimal .env loader (no python-dotenv dependency needed)."""
-    if not env_path.exists():
-        return
-    for line in env_path.read_text().splitlines():
-        line = line.strip()
-        if line and not line.startswith("#") and "=" in line:
-            k, v = line.split("=", 1)
-            os.environ.setdefault(k.strip(), v.strip())
 
 
 @dataclass

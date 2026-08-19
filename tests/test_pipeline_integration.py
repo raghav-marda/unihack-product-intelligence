@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.ingestion.pdf_loader import load_pdf
+from src.ingestion.pdf_loader import load_pdf, Chunk
 from src.extraction.extractor import GeminiExtractor
 from src.pipeline import process_document, REPO_ROOT, OUTPUT_DIR
 
@@ -64,6 +64,7 @@ def test_full_pipeline_end_to_end(mock_extractor, tmp_path, monkeypatch):
 
     doc = load_pdf(str(BEARING_PDF))
     fake_response = MagicMock()
+    fake_response.parsed = None  # force the manual json.loads + validate fallback path
     fake_response.text = json.dumps(_mock_json(doc))
     mock_extractor.client.models.generate_content.return_value = fake_response
 
@@ -80,3 +81,49 @@ def test_full_pipeline_end_to_end(mock_extractor, tmp_path, monkeypatch):
     reloaded = json.loads(saved_path.read_text())
     assert reloaded["doc_name"] == doc.doc_name
     assert reloaded["extraction"]["model_number"]["value"] == "MOCK-1"
+
+
+def test_pipeline_handles_large_document_via_batched_extraction(mock_extractor, tmp_path):
+    """End-to-end check that a document large enough to need multiple
+    extraction batches still produces one coherent merged product record
+    through the full ingest -> extract -> validate -> save chain."""
+    # Build a synthetic "document" with enough chunk volume to force batching.
+    big_chunks = [
+        Chunk(chunk_id=f"big-p{i}-text", doc_id="bigdoc", doc_name="big_catalog_entry.pdf",
+              page_number=i, text=f"Page {i} content. " * 400, kind="text")
+        for i in range(1, 11)
+    ]
+    from src.ingestion.pdf_loader import ParsedDocument
+    big_doc = ParsedDocument(
+        doc_id="bigdoc", doc_name="big_catalog_entry.pdf",
+        file_path="/fake/path.pdf", num_pages=10, chunks=big_chunks,
+    )
+
+    from src.extraction.extractor import _batch_chunks
+    batches = _batch_chunks(big_doc.chunks)
+    assert len(batches) > 1, "test setup should actually exercise multi-batch behavior"
+
+    call_log = []
+
+    def side_effect(*args, **kwargs):
+        call_log.append(1)
+        resp = MagicMock()
+        resp.parsed = None
+        # Each batch "finds" a different field, to prove merging actually happens
+        idx = len(call_log)
+        payload = _mock_json(big_doc)
+        payload["model_number"]["value"] = f"BATCH-{idx}-MODEL"
+        payload["model_number"]["confidence"] = 0.5 + (idx * 0.05)  # later batches "more confident"
+        resp.text = json.dumps(payload)
+        return resp
+
+    mock_extractor.client.models.generate_content.side_effect = side_effect
+
+    record = process_document(big_doc, mock_extractor)
+
+    assert len(call_log) == len(batches), "should make exactly one API call per batch"
+    # The merge logic should have kept the highest-confidence model_number
+    assert record.extraction["model_number"]["value"] == f"BATCH-{len(batches)}-MODEL"
+
+    saved_path = record.save(output_dir=tmp_path)
+    assert saved_path.exists()
