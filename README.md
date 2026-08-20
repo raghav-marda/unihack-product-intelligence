@@ -1,6 +1,6 @@
 <div align="center">
 
-# UniHack — AI-Powered Product Intelligence for Industrial Manufacturers
+# SpecTrace — AI-Powered Product Intelligence for Industrial Manufacturers
 
 **Turning fragmented industrial product data into structured, validated, traceable product intelligence — at catalog scale.**
 
@@ -44,7 +44,7 @@ The challenge: build an AI-powered system that automates the **creation, enrichm
 
 We didn't want to build "upload a PDF, an LLM hallucinates a spec sheet, done." That's not defensible at catalog scale — one wrong voltage rating on an industrial part is a liability, not a UX bug.
 
-So the system is built around one core principle: **every extracted value must be traceable back to the exact page and text it came from, and every value's trustworthiness must be independently checkable — not just self-reported by the model.**
+So SpecTrace is built around one core principle: **every extracted value must be traceable back to the exact page and text it came from, and every value's trustworthiness must be independently checkable — not just self-reported by the model.**
 
 That means two separate layers doing two separate jobs:
 
@@ -293,5 +293,5 @@ Given more time, the next additions would be:
 ---
 
 <div align="center">
-Built for H2S UniHack 2026 — AI-Powered Product Intelligence for Industrial Manufacturers
+Built for H2S UniHack 2026 — SpecTrace, AI-Powered Product Intelligence for Industrial Manufacturers
 </div>

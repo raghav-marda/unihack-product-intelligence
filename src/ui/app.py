@@ -1,5 +1,5 @@
 """
-Streamlit review dashboard for UniHack product intelligence pipeline.
+Streamlit review dashboard for SpecTrace — the product intelligence pipeline.
 
 Flow:
   1. Upload a product datasheet PDF (or pick from bundled samples).
@@ -34,7 +34,7 @@ SAMPLES_DIR = REPO_ROOT / "data" / "samples"
 UPLOAD_DIR = REPO_ROOT / "data" / "_uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
-st.set_page_config(page_title="UniHack Product Intelligence", layout="wide")
+st.set_page_config(page_title="SpecTrace — Product Intelligence", layout="wide")
 
 
 # ---------------------------------------------------------------------------
@@ -95,8 +95,8 @@ load_existing_outputs()
 # ---------------------------------------------------------------------------
 # Sidebar: ingest controls
 # ---------------------------------------------------------------------------
-st.sidebar.title("UniHack — Product Intelligence")
-st.sidebar.caption("AI-powered extraction for industrial product datasheets")
+st.sidebar.title("SpecTrace")
+st.sidebar.caption("AI-powered product intelligence for industrial datasheets")
 
 st.sidebar.subheader("1. Add a document")
 
