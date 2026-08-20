@@ -75,12 +75,42 @@ def test_full_pipeline_end_to_end(mock_extractor, tmp_path, monkeypatch):
     assert "completeness_score" in record.validation
     assert record.validation["issue_count"] >= 1  # operating_temperature_range is missing
 
+    # Enrichment should have run and normalized the Voltage spec
+    assert "normalized_specifications" in record.enrichment
+    normalized_params = {n["parameter"] for n in record.enrichment["normalized_specifications"]}
+    assert "Voltage" in normalized_params
+    # category "generic" has no entry in the standards reference table —
+    # enrichment should honestly return None rather than guessing
+    assert record.enrichment["standards_suggestion"] is None
+
     # Save to a temp dir instead of the real output dir, to avoid polluting it
     saved_path = record.save(output_dir=tmp_path)
     assert saved_path.exists()
     reloaded = json.loads(saved_path.read_text())
     assert reloaded["doc_name"] == doc.doc_name
     assert reloaded["extraction"]["model_number"]["value"] == "MOCK-1"
+
+
+def test_pipeline_enrichment_suggests_standards_for_known_category(mock_extractor, tmp_path):
+    """End-to-end check with a category that DOES have reference-table
+    entries (unlike the generic mock above), confirming the enrichment
+    step is actually wired all the way through and not just present but
+    inert."""
+    if not BEARING_PDF.exists():
+        pytest.skip("Sample PDF not found")
+
+    doc = load_pdf(str(BEARING_PDF))
+    payload = _mock_json(doc)
+    payload["category"]["value"] = "bearing"
+
+    fake_response = MagicMock()
+    fake_response.parsed = None
+    fake_response.text = json.dumps(payload)
+    mock_extractor.client.models.generate_content.return_value = fake_response
+
+    record = process_document(doc, mock_extractor)
+    assert record.enrichment["standards_suggestion"] is not None
+    assert any("ISO" in s for s in record.enrichment["standards_suggestion"]["suggested_standards"])
 
 
 def test_pipeline_handles_large_document_via_batched_extraction(mock_extractor, tmp_path):

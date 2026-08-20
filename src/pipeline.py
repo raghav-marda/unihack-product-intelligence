@@ -3,11 +3,12 @@ Pipeline orchestrator.
 
 Runs the full flow for one or many PDFs:
     ingest (pdf_loader) -> extract (extractor, Gemini) -> validate (validator)
+    -> enrich (enricher)
 and writes a combined per-product JSON record to data/output/, which the
 Streamlit review UI reads from.
 
 This is the single entry point both the CLI and the UI call, so ingestion/
-extraction/validation logic never has to be duplicated.
+extraction/validation/enrichment logic never has to be duplicated.
 """
 from __future__ import annotations
 
@@ -21,6 +22,7 @@ from src.env_utils import load_env_file
 from src.ingestion.pdf_loader import ParsedDocument, load_pdf, load_pdfs_from_dir
 from src.extraction.extractor import GeminiExtractor, ExtractionResult
 from src.validation.validator import ValidationReport, validate_extraction
+from src.enrichment.enricher import EnrichmentResult, enrich_extraction
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 OUTPUT_DIR = REPO_ROOT / "data" / "output"
@@ -32,6 +34,7 @@ class ProductRecord:
     doc_name: str
     extraction: dict
     validation: dict
+    enrichment: dict
 
     def to_dict(self) -> dict:
         return {
@@ -39,6 +42,7 @@ class ProductRecord:
             "doc_name": self.doc_name,
             "extraction": self.extraction,
             "validation": self.validation,
+            "enrichment": self.enrichment,
         }
 
     def save(self, output_dir: Path = OUTPUT_DIR) -> Path:
@@ -53,12 +57,14 @@ def process_document(doc: ParsedDocument, extractor: GeminiExtractor) -> Product
     extraction: ExtractionResult = extractor.extract(doc)
     fields = extraction.raw_json
     validation: ValidationReport = validate_extraction(doc.doc_name, fields)
+    enrichment: EnrichmentResult = enrich_extraction(fields)
 
     return ProductRecord(
         doc_id=doc.doc_id,
         doc_name=doc.doc_name,
         extraction=fields,
         validation=validation.to_dict(),
+        enrichment=enrichment.to_dict(),
     )
 
 

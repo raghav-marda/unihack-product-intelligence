@@ -29,6 +29,7 @@ if str(REPO_ROOT) not in sys.path:
 from src.ingestion.pdf_loader import load_pdf, ParsedDocument
 from src.extraction.extractor import GeminiExtractor
 from src.pipeline import process_document, load_env_file, OUTPUT_DIR
+from src.search.catalog_index import CatalogIndex
 
 SAMPLES_DIR = REPO_ROOT / "data" / "samples"
 UPLOAD_DIR = REPO_ROOT / "data" / "_uploads"
@@ -44,6 +45,22 @@ if "records" not in st.session_state:
     st.session_state.records = {}   # doc_name -> record dict (mutable, holds edits)
 if "chunk_lookup" not in st.session_state:
     st.session_state.chunk_lookup = {}  # doc_name -> {chunk_id: text}
+if "catalog_index" not in st.session_state:
+    st.session_state.catalog_index = None
+if "search_results" not in st.session_state:
+    st.session_state.search_results = None
+
+
+def get_catalog_index() -> CatalogIndex | None:
+    if st.session_state.catalog_index is not None:
+        return st.session_state.catalog_index
+    load_env_file()
+    try:
+        st.session_state.catalog_index = CatalogIndex()
+        return st.session_state.catalog_index
+    except ValueError as e:
+        st.error(str(e))
+        return None
 
 
 def get_extractor() -> GeminiExtractor | None:
@@ -135,7 +152,7 @@ if not st.session_state.records:
     st.stop()
 
 doc_names = list(st.session_state.records.keys())
-tab_labels = ["📋 Catalog Overview"] + doc_names
+tab_labels = ["📋 Catalog Overview", "🔍 Catalog Search"] + doc_names
 tabs = st.tabs(tab_labels)
 
 # --- Catalog overview tab ---
@@ -163,9 +180,57 @@ with tabs[0]:
     st.download_button(
         "⬇️ Export full catalog (JSON)",
         data=json.dumps(all_export, indent=2),
-        file_name="unihack_catalog_export.json",
+        file_name="spectrace_catalog_export.json",
         mime="application/json",
     )
+
+# --- Catalog search tab: RAG over all processed products ---
+with tabs[1]:
+    st.subheader("Search across the catalog")
+    st.caption(
+        "Semantic search over every processed product — ask in natural "
+        "language rather than matching exact keywords. Powered by Gemini "
+        "embeddings + a local vector index (ChromaDB)."
+    )
+
+    if st.button("🔄 Build / refresh search index from processed records"):
+        index = get_catalog_index()
+        if index is not None:
+            with st.spinner(f"Embedding {len(st.session_state.records)} product(s)..."):
+                try:
+                    index.add_products(list(st.session_state.records.values()))
+                    st.success(f"Indexed {index.count()} product(s). Ready to search.")
+                except Exception as e:
+                    st.error(f"Indexing failed: {e}")
+
+    query = st.text_input(
+        "Ask a question about your catalog",
+        placeholder="e.g. 'which products are rated for high temperature?' or 'bearings with high load rating'",
+    )
+    if st.button("Search") and query:
+        index = get_catalog_index()
+        if index is not None:
+            if index.count() == 0:
+                st.warning("Search index is empty — click 'Build / refresh search index' first.")
+            else:
+                with st.spinner("Searching..."):
+                    try:
+                        results = index.search(query, n_results=5)
+                        st.session_state.search_results = results
+                    except Exception as e:
+                        st.error(f"Search failed: {e}")
+
+    if st.session_state.search_results:
+        st.markdown("### Results")
+        for r in st.session_state.search_results:
+            with st.container(border=True):
+                c1, c2 = st.columns([3, 1])
+                with c1:
+                    st.markdown(f"**{r.product_name or r.doc_name}**")
+                    st.caption(f"{r.category or '—'} · {r.model_number or '—'} · {r.doc_name}")
+                with c2:
+                    st.caption(f"match distance: {r.distance:.3f}")
+                st.text(r.snippet)
 
 # --- Per-document review tabs ---
 FIELD_LABELS = {
@@ -181,7 +246,7 @@ FIELD_LABELS = {
     "compliance_standards": "Compliance Standards",
 }
 
-for tab, doc_name in zip(tabs[1:], doc_names):
+for tab, doc_name in zip(tabs[2:], doc_names):
     with tab:
         rec = st.session_state.records[doc_name]
         fields = rec.get("extraction", {})
@@ -260,11 +325,20 @@ for tab, doc_name in zip(tabs[1:], doc_names):
 
         st.markdown("### Key Specifications")
         specs = fields.get("key_specifications", []) or []
+        normalized_by_param = {
+            (n.get("parameter") or "").strip().lower(): n.get("normalization", {})
+            for n in (rec.get("enrichment") or {}).get("normalized_specifications", []) or []
+        }
         if specs:
             spec_df = pd.DataFrame([
                 {
                     "Parameter": s.get("parameter"),
                     "Value": s.get("value"),
+                    "Normalized": (
+                        f"{normalized_by_param[(s.get('parameter') or '').strip().lower()].get('normalized_value')} "
+                        f"{normalized_by_param[(s.get('parameter') or '').strip().lower()].get('normalized_unit')}"
+                        if (s.get("parameter") or "").strip().lower() in normalized_by_param else ""
+                    ),
                     "Page": s.get("source_page"),
                     "Confidence": s.get("confidence"),
                     "Flag": s.get("flag") or "",
@@ -272,8 +346,21 @@ for tab, doc_name in zip(tabs[1:], doc_names):
                 for s in specs
             ])
             st.dataframe(spec_df, width='stretch', hide_index=True)
+            if normalized_by_param:
+                st.caption(
+                    "'Normalized' converts equivalent units to a common form (e.g. rpm/min⁻¹ "
+                    "→ rpm, °F → °C) so specs are comparable across the catalog, not just "
+                    "within this one document."
+                )
         else:
             st.caption("No key specifications extracted.")
+
+        standards_suggestion = (rec.get("enrichment") or {}).get("standards_suggestion")
+        if standards_suggestion:
+            with st.expander("💡 Suggested standards to verify (enrichment, not extracted)", expanded=False):
+                st.caption(standards_suggestion.get("reasoning", ""))
+                for std in standards_suggestion.get("suggested_standards", []):
+                    st.markdown(f"- {std}")
 
         colx, coly = st.columns(2)
         with colx:
